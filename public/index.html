@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>Clipper: AI video highlights</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✂️</text></svg>">
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1f232c;--line:#2a2f3a;--text:#e8eaf0;--muted:#9aa3b2;--accent:#7c5cff;--accent2:#22d3ee;--ok:#22c55e;--err:#ef4444;--r:14px}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+button,input,select,textarea{font:inherit;color:inherit}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;padding-top:max(12px,env(safe-area-inset-top));border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(8px);z-index:20}
+.logo{font-weight:800;font-size:20px;letter-spacing:-.02em}
+.logo span{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+main{max-width:1100px;margin:0 auto;padding:18px 14px 90px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.tabs{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto}
+.tab{flex:1;min-width:max-content;padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);cursor:pointer;color:var(--muted)}
+.tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.row{display:flex;gap:8px;align-items:stretch}
+input[type=text],input[type=url],input[type=number],select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:16px}
+textarea{min-height:180px;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:14px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);border-color:transparent}
+.btn,.actions button,.mini{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:9px 12px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.btn:hover,.actions button:hover,.mini:hover{border-color:var(--accent)}
+.primary{background:linear-gradient(90deg,var(--accent),#5b8cff)!important;border-color:transparent!important;color:#fff;font-weight:600}
+.ghost{background:transparent!important}
+#go{width:100%;padding:14px;border-radius:12px;font-size:16px;margin-top:14px;cursor:pointer;border:0;color:#fff;font-weight:700;background:linear-gradient(90deg,var(--accent),#5b8cff)}
+#go:disabled{opacity:.6;cursor:wait}
+.hint{color:var(--muted);font-size:13px;margin:8px 0 0}
+#drop{display:block;border:2px dashed var(--line);border-radius:var(--r);padding:34px 16px;text-align:center;cursor:pointer;transition:.15s}
+#drop.over,#drop:hover{border-color:var(--accent);background:rgba(124,92,255,.07)}
+#drop-title{font-weight:600;font-size:16px;word-break:break-word}
+#drop-sub{color:var(--muted);font-size:13px;margin-top:4px}
+.opts{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+summary{cursor:pointer;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:10px}
+.grid label{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.grid label.check{flex-direction:row;align-items:center;gap:8px;color:var(--text)}
+#results{margin-top:22px}
+.res-head{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.res-head h2{margin:0 0 4px;font-size:20px}
+#res-summary{color:var(--muted);margin:0 0 4px}
+#res-meta{color:var(--muted);font-size:12px}
+.res-tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.res-tools select{width:auto;padding:8px 10px;font-size:14px}
+.layout{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;align-items:start}
+.player-col{position:sticky;top:72px}
+#player{aspect-ratio:16/9;background:#000;border-radius:var(--r);overflow:hidden}
+#player iframe,#player video,#player>div{width:100%;height:100%;display:block;border:0}
+#player .placeholder{display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);padding:20px}
+#cards{display:flex;flex-direction:column;gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.card.playing{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card-top{display:flex;gap:12px;align-items:center}
+.card h3{margin:0;font-size:16px}
+.score{flex:none;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--ok) calc(var(--s) * 1%),var(--line) 0)}
+.score b{width:36px;height:36px;border-radius:50%;background:var(--panel);display:grid;place-items:center;font-size:13px}
+.times{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0}
+.times input{width:86px;padding:7px 8px;text-align:center;font-family:ui-monospace,Menlo,monospace;background:var(--bg);border:1px solid var(--line);border-radius:8px;font-size:16px}
+.mini{padding:6px 8px;font-size:12px}
+.dur{color:var(--muted);font-size:12px}
+.hook{margin:6px 0;font-weight:600}
+.reason{margin:4px 0;color:var(--muted);font-size:14px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.tags span{background:var(--panel2);border-radius:999px;padding:2px 9px;font-size:12px;color:var(--accent2)}
+.actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+#transcript-box{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px}
+#transcript-lines{max-height:340px;overflow:auto;margin-top:8px}
+.tl{display:flex;gap:10px;padding:3px 0;font-size:14px}
+.tl button{flex:none;background:none;border:0;color:var(--accent2);cursor:pointer;font-family:ui-monospace,Menlo,monospace;padding:0}
+#busy{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;z-index:50;padding:24px;text-align:center}
+.spinner{width:42px;height:42px;border:4px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#toast{position:fixed;left:50%;bottom:max(20px,env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:12px;z-index:60;max-width:min(92vw,520px);box-shadow:0 8px 30px rgba(0,0,0,.4)}
+#toast.error{border-color:var(--err);color:#fecaca}
+#sharebar{position:fixed;left:50%;bottom:max(76px,calc(env(safe-area-inset-bottom) + 60px));transform:translateX(-50%);display:flex;gap:8px;align-items:center;background:var(--panel2);border:1px solid var(--accent);padding:10px 12px;border-radius:14px;z-index:55;width:min(94vw,480px);box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#sharebar-text{flex:1;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#history{position:fixed;top:0;right:0;height:100%;width:min(380px,92vw);background:var(--panel);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .2s;z-index:40;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+#history.open{transform:none;box-shadow:-10px 0 40px rgba(0,0,0,.5)}
+.h-head{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+#history-list{overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.h-item{text-align:left;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer;display:flex;flex-direction:column;gap:2px}
+.h-item small{color:var(--muted)}
+.h-item:hover{border-color:var(--accent)}
+@media (max-width:900px){
+  .layout{grid-template-columns:1fr}
+  .player-col{top:58px;z-index:10;background:var(--bg);padding-bottom:8px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">✂️ <span>Clipper</span></div>
+  <button class="btn" id="history-btn" type="button">🕘 History</button>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="youtube" type="button">▶ YouTube link</button>
+      <button class="tab" data-tab="upload" type="button">⬆ Upload video</button>
+      <button class="tab" data-tab="transcript" type="button">📝 Paste transcript</button>
+    </div>
+
+    <!-- YouTube -->
+    <div class="tabpanel" data-panel="youtube">
+      <div class="row">
+        <input id="yt-url" type="url" inputmode="url" placeholder="https://youtu.be/..." autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="btn" id="yt-paste" type="button">📋 Paste</button>
+      </div>
+      <p class="hint">Gemini watches the video (audio + visuals) and returns timestamped highlights. Clips play right here using YouTube's embedded player. Public videos only.</p>
+    </div>
+
+    <!-- Upload -->
+    <div class="tabpanel" data-panel="upload" hidden>
+      <label id="drop">
+        <input id="file" type="file" accept="video/*,audio/*" hidden>
+        <div id="drop-title">📁 Tap to choose a video (or drop it here)</div>
+        <div id="drop-sub">Your video stays on your device. Only compressed audio is sent for transcription.</div>
+      </label>
+      <p class="hint">Exports real MP4 clips in your browser. Works best on a computer. On phones, keep files under ~500 MB and keep the screen on.</p>
+    </div>
+
+    <!-- Transcript -->
+    <div class="tabpanel" data-panel="transcript" hidden>
+      <textarea id="tx-text" placeholder="Paste a transcript with timestamps, e.g.&#10;0:00 Welcome back to the channel&#10;0:07 Today we're going to...&#10;&#10;...or paste/load an SRT or VTT subtitle file."></textarea>
+      <div class="row" style="margin-top:8px">
+        <input id="tx-url" type="url" inputmode="url" placeholder="YouTube link (optional, enables preview)" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <label class="btn">📄 SRT/VTT<input id="tx-file" type="file" accept=".srt,.vtt,.txt,text/plain" hidden></label>
+      </div>
+    </div>
+
+    <details class="opts">
+      <summary>⚙️ Options</summary>
+      <div class="grid">
+        <label>Number of clips<input id="opt-count" type="number" min="1" max="20" value="6" inputmode="numeric"></label>
+        <label>Min length (sec)<input id="opt-min" type="number" min="5" value="20" inputmode="numeric"></label>
+        <label>Max length (sec)<input id="opt-max" type="number" min="10" value="75" inputmode="numeric"></label>
+        <label>Focus (optional)<input id="opt-focus" type="text" placeholder="funny moments, tips..."></label>
+        <label>Audio language (upload)<input id="opt-lang" type="text" placeholder="auto, or en, es, hi..."></label>
+        <label>Export mode (upload)
+          <select id="opt-export">
+            <option value="fast">Fast (snaps to keyframe)</option>
+            <option value="accurate">Accurate (re-encode)</option>
+            <option value="vertical">Vertical 9:16 (re-encode)</option>
+          </select>
+        </label>
+        <label class="check"><input id="opt-long" type="checkbox"> Long video mode (over 1 hour)</label>
+      </div>
+    </details>
+
+    <button id="go" type="button">✨ Find highlights</button>
+  </section>
+
+  <section id="results" hidden>
+    <div class="res-head">
+      <div>
+        <h2 id="res-title"></h2>
+        <p id="res-summary"></p>
+        <div id="res-meta"></div>
+      </div>
+      <div class="res-tools">
+        <select id="sort" aria-label="Sort clips">
+          <option value="time">Timeline order</option>
+          <option value="score">Best first</option>
+        </select>
+        <button class="btn" id="exp-json" type="button">JSON</button>
+        <button class="btn" id="exp-csv" type="button">CSV</button>
+        <button class="btn" id="exp-md" type="button">Markdown</button>
+      </div>
+    </div>
+    <div class="layout">
+      <div class="player-col"><div id="player" data-kind="none"></div></div>
+      <div>
+        <div id="cards"></div>
+        <details id="transcript-box" hidden>
+          <summary>📜 Transcript (tap a time to jump)</summary>
+          <div id="transcript-lines"></div>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<aside id="history" aria-label="History">
+  <div class="h-head"><strong>History</strong><button class="btn ghost" id="history-close" type="button">✕</button></div>
+  <div id="history-list"></div>
+</aside>
+
+<div id="busy" hidden><div class="spinner"></div><div id="busy-text">Working...</div></div>
+
+<div id="sharebar" hidden>
+  <span id="sharebar-text">Clip ready</span>
+  <button class="btn primary" id="sharebar-btn" type="button">📤 Save / Share</button>
+  <button class="btn ghost" id="sharebar-close" type="button" aria-label="Dismiss">✕</button>
+</div>
+
+<div id="toast" hidden></div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

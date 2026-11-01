@@ -1,0 +1,15 @@
+name = "clipper"
+pages_build_output_dir = "public"
+compatibility_date = "2026-10-01"
+
+# Workers AI (Whisper transcription for the Upload tab)
+[ai]
+binding = "AI"
+
+# Non-secret settings. Change model IDs here if Google/Cloudflare rename them.
+# GEMINI_API_KEY and APP_PASSWORD are SECRETS: set them with
+#   npx wrangler pages secret put GEMINI_API_KEY
+[vars]
+GEMINI_MODEL = "gemini-3.8-flash"
+GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo"

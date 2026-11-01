@@ -1,0 +1,19 @@
+{
+  "name": "clipper",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Free personal AI video clipper on Cloudflare Pages",
+  "scripts": {
+    "build": "node scripts/copy-vendor.mjs",
+    "dev": "npm run build && wrangler pages dev",
+    "deploy": "npm run build && wrangler pages deploy"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "0.12.10",
+    "@ffmpeg/util": "0.12.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
