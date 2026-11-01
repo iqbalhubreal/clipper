@@ -19,6 +19,7 @@ const state = {
   sort: "time",
   busy: false,
   ffInName: null,
+  jsonExports: [],
 };
 
 /* ============================== utils ============================== */
@@ -144,12 +145,12 @@ async function api(path, body) {
 
 function getOptions() {
   return {
-    count: +$("#opt-count").value || 6,
-    minLen: +$("#opt-min").value || 20,
-    maxLen: +$("#opt-max").value || 75,
-    focus: $("#opt-focus").value.trim(),
+    count: 6,
+    minLen: 20,
+    maxLen: 75,
+    focus: "",
     model: $("#opt-model").value,
-    longVideo: $("#opt-long").checked,
+    longVideo: false,
   };
 }
 
@@ -200,9 +201,7 @@ async function ensureInput(ff, file) {
 async function run() {
   if (state.busy) return;
   try {
-    if (state.tab === "youtube") await runYouTube();
-    else if (state.tab === "upload") await runUpload();
-    else await runTranscript();
+    await runCombinedWorkflow();
   } catch (e) {
     console.error(e);
     toast(e.message || String(e), "error");
@@ -210,6 +209,21 @@ async function run() {
     setBusy(false);
     ffProgress = null;
   }
+}
+
+async function runCombinedWorkflow() {
+  const file = state.file;
+  const url = $("#yt-url").value.trim();
+  const videoId = extractYouTubeId(url);
+  if (!videoId) return toast("Paste a valid YouTube URL first.", "error");
+  if (!file) return toast("Upload the matching video file first.", "error");
+  const maxBytes = isMobile() ? 500e6 : 1.8e9;
+  if (file.size > maxBytes) return toast(`File too large for this device (max ~${Math.round(maxBytes / 1e6)} MB).`, "error");
+  setBusy(true, "Gemini is reading the YouTube video and finding highlights...");
+  const data = await api("/api/highlights", { mode: "youtube", url, options: getOptions() });
+  if (!data.highlights?.length) throw new Error("Gemini did not return any usable highlights.");
+  showResult(data, { type: "file", name: file.name, videoId, url }, null);
+  await cutSections(data.highlights.map((h) => ({ ...h, title: h.title || "Highlight" })));
 }
 
 async function runYouTube() {
@@ -327,6 +341,93 @@ function parseTranscriptInput(raw) {
   const segs = out.filter((s) => s.text && Number.isFinite(s.start));
   segs.forEach((s, i) => (s.end = segs[i + 1]?.start ?? s.start + 5));
   return segs;
+}
+
+function parseClipInstructions(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Clip instructions must be valid JSON.");
+  }
+  const clips = Array.isArray(parsed) ? parsed : parsed?.clips;
+  if (!Array.isArray(clips) || !clips.length) {
+    throw new Error("JSON must contain a non-empty 'clips' array.");
+  }
+  if (clips.length > 50) throw new Error("You can generate at most 50 clips at once.");
+  return clips.map((clip, i) => {
+    if (!clip || typeof clip !== "object") throw new Error(`Clip ${i + 1} must be an object.`);
+    const start = parseTime(clip.start ?? clip.start_seconds);
+    const end = parseTime(clip.end ?? clip.end_seconds);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+      throw new Error(`Clip ${i + 1} needs a valid start and an end after it.`);
+    }
+    if (state.duration && end > state.duration + 0.5) {
+      throw new Error(`Clip ${i + 1} ends after the video duration (${fmt(state.duration)}).`);
+    }
+    const title = String(clip.name ?? clip.title ?? clip.label ?? `Clip ${i + 1}`).trim().slice(0, 120) || `Clip ${i + 1}`;
+    return { start, end, title };
+  });
+}
+
+function clearJSONExports() {
+  for (const item of state.jsonExports) URL.revokeObjectURL(item.url);
+  state.jsonExports = [];
+  $("#json-cut-list").hidden = true;
+  $("#json-cut-list").innerHTML = "";
+}
+
+function renderJSONExports() {
+  const list = $("#json-cut-list");
+  list.innerHTML = state.jsonExports.map((item, i) => `
+    <div class="json-cut">
+      <div><strong>${i + 1}. ${esc(item.title)}</strong><small>${fmt(item.start)} → ${fmt(item.end)} · ${Math.round(item.end - item.start)}s</small></div>
+      <a class="btn primary" href="${item.url}" download="${esc(item.name)}">⬇ Download MP4</a>
+    </div>`).join("");
+  list.hidden = false;
+}
+
+async function cutSections(highlights) {
+  const file = state.file;
+  if (!file) throw new Error("Choose a video file first.");
+  clearJSONExports();
+  const cuts = highlights.map((h, i) => {
+    const start = Math.max(0, Number(h.start) - 2);
+    const end = state.duration ? Math.min(state.duration, Number(h.end) + 2) : Number(h.end) + 2;
+    return { start, end, title: h.title || `Highlight ${i + 1}` };
+  }).filter((c) => Number.isFinite(c.start) && Number.isFinite(c.end) && c.end > c.start);
+  try {
+    setBusy(true, "Loading video engine (~30 MB, first time only)...");
+    const ff = await getFFmpeg();
+    setBusy(true, "Reading the uploaded video...");
+    const input = await ensureInput(ff, file);
+    for (let i = 0; i < cuts.length; i++) {
+      const cut = cuts[i];
+      const out = `highlight_cut_${String(i).padStart(3, "0")}.mp4`;
+      const args = ["-ss", cut.start.toFixed(2), "-i", input, "-t", (cut.end - cut.start).toFixed(2), "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", out];
+      ffProgress = (p) => setBusy(true, `Cutting ${i + 1} of ${cuts.length}... ${Math.round(Math.min(1, Math.max(0, p)) * 100)}%`);
+      setBusy(true, `Cutting ${i + 1} of ${cuts.length}: “${cut.title}”...`);
+      const code = await ff.exec(args);
+      if (code !== 0) throw new Error(`FFmpeg failed on “${cut.title}”.`);
+      const data = await ff.readFile(out);
+      state.jsonExports.push({
+        title: cut.title,
+        start: cut.start,
+        end: cut.end,
+        name: `${String(i + 1).padStart(2, "0")}-${slug(cut.title)}.mp4`,
+        url: URL.createObjectURL(new Blob([data], { type: "video/mp4" })),
+      });
+      try { await ff.deleteFile(out); } catch {}
+      renderJSONExports();
+    }
+    toast(`${cuts.length} clip${cuts.length === 1 ? "" : "s"} ready with 2-second handles ✓`);
+  } catch (e) {
+    console.error(e);
+    toast(e.message || String(e), "error");
+  } finally {
+    ffProgress = null;
+    setBusy(false);
+  }
 }
 
 /* ============================== results ============================== */
@@ -455,14 +556,7 @@ async function ensureYT(videoId) {
 function setupPlayer() {
   const src = state.result.source || {};
   const wrap = $("#player");
-  if (src.videoId) {
-    if (wrap.dataset.kind !== "yt") {
-      wrap.innerHTML = `<div id="yt-player"></div>`;
-      wrap.dataset.kind = "yt";
-      ytPlayer = null;
-    }
-    ensureYT(src.videoId).catch(() => toast("Couldn't load the YouTube player.", "error"));
-  } else if (src.type === "file" && state.fileURL && state.file?.name === src.name) {
+  if (src.type === "file" && state.fileURL && state.file?.name === src.name) {
     if (wrap.dataset.kind !== "file" || $("#player video")?.src !== state.fileURL) {
       wrap.innerHTML = `<video controls playsinline src="${state.fileURL}"></video>`;
       wrap.dataset.kind = "file";
@@ -474,6 +568,13 @@ function setupPlayer() {
         }
       });
     }
+  } else if (src.videoId) {
+    if (wrap.dataset.kind !== "yt") {
+      wrap.innerHTML = `<div id="yt-player"></div>`;
+      wrap.dataset.kind = "yt";
+      ytPlayer = null;
+    }
+    ensureYT(src.videoId).catch(() => toast("Couldn't load the YouTube player.", "error"));
   } else {
     wrap.dataset.kind = "none";
     ytPlayer = null;
@@ -529,7 +630,7 @@ function deliverClip(blob, name, title) {
 
 async function exportClip(i) {
   const h = state.result.highlights[i];
-  const mode = $("#opt-export").value;
+  const mode = "fast";
   if (state.busy) return;
   try {
     setBusy(true, "Loading video engine...");
@@ -643,7 +744,6 @@ function renderHistory() {
 
 function switchTab(tab) {
   state.tab = tab;
-  $$(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $$(".tabpanel").forEach((p) => (p.hidden = p.dataset.panel !== tab));
 }
 
@@ -665,7 +765,6 @@ function selectFile(file) {
   if (state.result?.source?.type === "file") renderResult(); // re-attach preview/export if same file
 }
 
-$$(".tab").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 $("#go").addEventListener("click", run);
 $("#yt-url").addEventListener("keydown", (e) => e.key === "Enter" && run());
 $("#file").addEventListener("change", (e) => selectFile(e.target.files[0]));
@@ -687,10 +786,6 @@ const drop = $("#drop");
 ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => (e.preventDefault(), drop.classList.remove("over"))));
 drop.addEventListener("drop", (e) => selectFile(e.dataTransfer.files[0]));
 
-$("#tx-file").addEventListener("change", async (e) => {
-  const f = e.target.files[0];
-  if (f) $("#tx-text").value = await f.text();
-});
 
 $("#cards").addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-act]");
