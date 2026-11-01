@@ -148,6 +148,7 @@ function getOptions() {
     minLen: +$("#opt-min").value || 20,
     maxLen: +$("#opt-max").value || 75,
     focus: $("#opt-focus").value.trim(),
+    model: $("#opt-model").value,
     longVideo: $("#opt-long").checked,
   };
 }

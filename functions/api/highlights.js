@@ -8,18 +8,23 @@
  *   { mode: "youtube",    url: "https://youtu.be/...", options }
  *   { mode: "transcript", transcript: "[0:00] text...", title?, durationSeconds?, options }
  *
- * options: { count, minLen, maxLen, focus, longVideo }
+ * options: { count, minLen, maxLen, focus, longVideo, model }
  *
  * Env:
  *   GEMINI_API_KEY         (secret, required)
- *   GEMINI_MODEL           (optional, default gemini-3.8-flash)
- *   GEMINI_FALLBACK_MODEL  (optional, default gemini-3.5-flash-lite)
+ *   GEMINI_MODEL           (optional fallback, default gemini-3.5-flash)
+ *   GEMINI_FALLBACK_MODEL  (optional fallback, default gemini-3.1-flash-lite)
  *   APP_PASSWORD           (optional; if set, requests must send x-app-password)
  */
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL = "gemini-3.8-flash";
-const DEFAULT_FALLBACK = "gemini-3.5-flash-lite";
+const DEFAULT_MODEL = "gemini-3.5-flash";
+const DEFAULT_FALLBACK = "gemini-3.1-flash-lite";
+const ALLOWED_MODELS = new Set([
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3.7-flash",
+]);
 const RETRYABLE = new Set([404, 429, 500, 502, 503, 504]);
 
 export async function onRequestPost({ request, env }) {
@@ -38,7 +43,10 @@ export async function onRequestPost({ request, env }) {
   }
 
   const opts = normalizeOptions(body.options);
-  const generationConfig = { responseMimeType: "application/json" };
+  const generationConfig = {
+    responseMimeType: "application/json",
+    thinkingConfig: { thinkingLevel: "MEDIUM" },
+  };
   let parts;
 
   if (body.mode === "youtube") {
@@ -59,8 +67,9 @@ export async function onRequestPost({ request, env }) {
     return json({ error: "mode must be 'youtube' or 'transcript'." }, 400);
   }
 
+  const selectedModel = opts.model || env.GEMINI_MODEL || DEFAULT_MODEL;
   const models = [
-    ...new Set([env.GEMINI_MODEL || DEFAULT_MODEL, env.GEMINI_FALLBACK_MODEL || DEFAULT_FALLBACK].filter(Boolean)),
+    ...new Set([selectedModel, env.GEMINI_FALLBACK_MODEL || DEFAULT_FALLBACK].filter(Boolean)),
   ];
   const payload = { contents: [{ role: "user", parts }], generationConfig };
   const duration = Number(body.durationSeconds) || null;
@@ -164,7 +173,9 @@ function normalizeOptions(o = {}) {
   const minLen = clamp(Math.round(num(o.minLen, 20)), 5, 600);
   const maxLen = clamp(Math.round(num(o.maxLen, 75)), minLen + 5, 900);
   const focus = String(o.focus || "").slice(0, 300).trim();
-  return { count, minLen, maxLen, focus, longVideo: !!o.longVideo };
+  const requestedModel = String(o.model || "").trim();
+  const model = ALLOWED_MODELS.has(requestedModel) ? requestedModel : null;
+  return { count, minLen, maxLen, focus, longVideo: !!o.longVideo, model };
 }
 
 function normalizeResult(data, opts, duration) {
