@@ -220,11 +220,62 @@ async function runCombinedWorkflow() {
   if (!file) return toast("Upload the matching video file first.", "error");
   const maxBytes = isMobile() ? 500e6 : 1.8e9;
   if (file.size > maxBytes) return toast(`File too large for this device (max ~${Math.round(maxBytes / 1e6)} MB).`, "error");
-  setBusy(true, "Gemini is reading the YouTube video and finding highlights...");
-  const data = await api("/api/highlights", { mode: "youtube", url, options: getOptions() });
+  setBusy(true, "Transcribing the uploaded video with Whisper...");
+  const segments = await transcribeUploadedVideo(file);
+  if (!segments.length) throw new Error("No speech detected in the uploaded video.");
+  const options = getOptions();
+  const duration = state.duration || segments.at(-1).end || 1;
+  const coverageEnd = duration * options.watchPercent / 100;
+  const analysisSegments = segments.filter((s) => s.start < coverageEnd);
+  const transcript = analysisSegments.map((s) => `[${fmt(s.start)}] ${s.text}`).join("\n");
+  if (transcript.length < 80) throw new Error("The selected AI watch coverage contains too little speech.");
+  setBusy(true, "Gemini is finding highlights from the transcript...");
+  const data = await api("/api/highlights", {
+    mode: "transcript",
+    transcript,
+    title: file.name,
+    durationSeconds: duration,
+    options,
+  });
   if (!data.highlights?.length) throw new Error("Gemini did not return any usable highlights.");
-  showResult(data, { type: "file", name: file.name, videoId, url }, null);
+  showResult(data, { type: "file", name: file.name, videoId, url }, segments);
   await cutSections(data.highlights.map((h) => ({ ...h, title: h.title || "Highlight" })));
+}
+
+async function transcribeUploadedVideo(file) {
+  setBusy(true, "Loading video engine (~30 MB, first time only)...");
+  const ff = await getFFmpeg();
+  setBusy(true, "Reading the uploaded video...");
+  const input = await ensureInput(ff, file);
+  for (const item of await ff.listDir("/")) {
+    if (!item.isDir && /^chunk_\d+\.mp3$/.test(item.name)) {
+      try { await ff.deleteFile(item.name); } catch {}
+    }
+  }
+  setBusy(true, "Extracting compressed audio...");
+  ffProgress = (p) => setBusy(true, `Extracting audio... ${Math.round(Math.min(1, Math.max(0, p)) * 100)}%`);
+  const code = await ff.exec([
+    "-i", input, "-vn", "-ac", "1", "-ar", "16000",
+    "-c:a", "libmp3lame", "-b:a", "32k",
+    "-f", "segment", "-segment_time", String(CHUNK_SECONDS), "-reset_timestamps", "1",
+    "chunk_%03d.mp3",
+  ]);
+  ffProgress = null;
+  if (code !== 0) throw new Error("Could not extract an audio track from this video.");
+  const chunks = (await ff.listDir("/"))
+    .filter((f) => !f.isDir && /^chunk_\d+\.mp3$/.test(f.name))
+    .map((f) => f.name)
+    .sort();
+  if (!chunks.length) throw new Error("No audio track found in this video.");
+  const segments = [];
+  for (let i = 0; i < chunks.length; i++) {
+    setBusy(true, `Transcribing part ${i + 1} of ${chunks.length} with Whisper...`);
+    const bytes = await ff.readFile(chunks[i]);
+    const r = await api("/api/transcribe", { audio: bytesToBase64(bytes), offset: i * CHUNK_SECONDS });
+    segments.push(...(r.segments || []));
+    try { await ff.deleteFile(chunks[i]); } catch {}
+  }
+  return segments.filter((s) => s.text && Number.isFinite(s.start));
 }
 
 async function runYouTube() {
