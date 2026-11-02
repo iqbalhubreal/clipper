@@ -150,6 +150,7 @@ function getOptions() {
     maxLen: 75,
     focus: "",
     model: $("#opt-model").value,
+    watchPercent: +$("#opt-watch").value || 100,
     longVideo: false,
   };
 }
@@ -766,6 +767,10 @@ function selectFile(file) {
 }
 
 $("#go").addEventListener("click", run);
+$("#opt-watch").addEventListener("input", (e) => {
+  $("#watch-value").value = `${e.target.value}%`;
+  $("#watch-value").textContent = `${e.target.value}%`;
+});
 $("#yt-url").addEventListener("keydown", (e) => e.key === "Enter" && run());
 $("#file").addEventListener("change", (e) => selectFile(e.target.files[0]));
 

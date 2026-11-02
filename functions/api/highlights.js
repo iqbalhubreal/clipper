@@ -8,7 +8,7 @@
  *   { mode: "youtube",    url: "https://youtu.be/...", options }
  *   { mode: "transcript", transcript: "[0:00] text...", title?, durationSeconds?, options }
  *
- * options: { count, minLen, maxLen, focus, longVideo, model }
+ * options: { count, minLen, maxLen, focus, longVideo, model, watchPercent }
  *
  * Env:
  *   GEMINI_API_KEY         (secret, required)
@@ -138,12 +138,17 @@ function buildPrompt(o, t) {
 
   return `${source}
 
+Analyze only approximately the first ${o.watchPercent}% of the video, starting at the beginning. Do not select moments beyond that coverage range.
+
 You are an expert short-form video editor. Find the ${o.count} best standalone clips to post as Shorts / Reels / TikToks.
 ${o.focus ? `Prioritise moments matching: ${o.focus}.\n` : ""}
 Rules:
 - Each clip must be between ${o.minLen} and ${o.maxLen} seconds long.
 - Start at the beginning of a sentence or thought, and end right after the payoff. Someone with zero context must understand it.
 - Prefer strong hooks, surprising or bold claims, emotion, humour, clear actionable advice, quotable lines and striking visual moments.
+- Never include an intro, opening title card, channel branding, logo animation, greeting, housekeeping, or other introductory material unless it immediately contains substantive content.
+- Never include sponsorships, paid promotions, advertisements, affiliate plugs, discount codes, product placements, self-promotion, calls to subscribe/follow, or other promotional/call-to-action sections.
+- If a promising moment contains a promotion or intro, skip it and choose a substantive section instead.
 - Clips must not overlap. Timestamps must match the actual video precisely.
 - Use "M:SS" format (or "H:MM:SS" past one hour).
 - score = 0-100 estimate of how well the clip would perform on its own.
@@ -173,9 +178,10 @@ function normalizeOptions(o = {}) {
   const minLen = clamp(Math.round(num(o.minLen, 20)), 5, 600);
   const maxLen = clamp(Math.round(num(o.maxLen, 75)), minLen + 5, 900);
   const focus = String(o.focus || "").slice(0, 300).trim();
+  const watchPercent = clamp(Math.round(num(o.watchPercent, 100)), 10, 100);
   const requestedModel = String(o.model || "").trim();
   const model = ALLOWED_MODELS.has(requestedModel) ? requestedModel : null;
-  return { count, minLen, maxLen, focus, longVideo: !!o.longVideo, model };
+  return { count, minLen, maxLen, focus, longVideo: !!o.longVideo, model, watchPercent };
 }
 
 function normalizeResult(data, opts, duration) {

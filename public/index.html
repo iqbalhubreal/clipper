@@ -126,6 +126,10 @@ summary{cursor:pointer;color:var(--muted)}
         <option value="gemini-3.7-flash">Gemini 3.7 Flash · Medium</option>
       </select>
     </label>
+    <label>AI watch coverage: <output id="watch-value">100%</output>
+      <input id="opt-watch" type="range" min="10" max="100" step="5" value="100">
+    </label>
+    <p class="hint">Controls how much of the YouTube video Gemini should inspect, from the beginning onward.</p>
     <button id="go" type="button">✨ Find highlights and create clips</button>
     <div id="json-cut-list" hidden></div>
   </section>
