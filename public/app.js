@@ -427,6 +427,7 @@ function clearJSONExports() {
   state.jsonExports = [];
   $("#json-cut-list").hidden = true;
   $("#json-cut-list").innerHTML = "";
+  $("#bulk-download-row").hidden = true;
 }
 
 function renderJSONExports() {
@@ -437,6 +438,7 @@ function renderJSONExports() {
       <a class="btn primary" href="${item.url}" download="${esc(item.name)}">⬇ Download MP4</a>
     </div>`).join("");
   list.hidden = false;
+  $("#bulk-download-row").hidden = false;
 }
 
 async function cutSections(highlights) {
@@ -446,7 +448,7 @@ async function cutSections(highlights) {
   const cuts = highlights.map((h, i) => {
     const start = Math.max(0, Number(h.start) - 2);
     const end = state.duration ? Math.min(state.duration, Number(h.end) + 2) : Number(h.end) + 2;
-    return { start, end, title: h.title || `Highlight ${i + 1}` };
+    return { ...h, start, end, originalStart: Number(h.start), originalEnd: Number(h.end), title: h.title || `Highlight ${i + 1}` };
   }).filter((c) => Number.isFinite(c.start) && Number.isFinite(c.end) && c.end > c.start);
   try {
     setBusy(true, "Loading video engine (~30 MB, first time only)...");
@@ -466,6 +468,13 @@ async function cutSections(highlights) {
         title: cut.title,
         start: cut.start,
         end: cut.end,
+        originalStart: Number(cut.originalStart ?? cut.start),
+        originalEnd: Number(cut.originalEnd ?? cut.end),
+        score: cut.score || 0,
+        hook: cut.hook || "",
+        reason: cut.reason || "",
+        quote: cut.quote || "",
+        tags: Array.isArray(cut.tags) ? cut.tags : [],
         name: `${String(i + 1).padStart(2, "0")}-${slug(cut.title)}.mp4`,
         url: URL.createObjectURL(new Blob([data], { type: "video/mp4" })),
       });
@@ -721,6 +730,98 @@ async function exportClip(i) {
   }
 }
 
+const ZIP_CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function zipCRC(bytes) {
+  let c = 0xffffffff;
+  for (const b of bytes) c = ZIP_CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function zipU16(n) {
+  return new Uint8Array([n & 255, (n >>> 8) & 255]);
+}
+
+function zipU32(n) {
+  return new Uint8Array([n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]);
+}
+
+function zipHeader(signature, name, crc, size, offset = null) {
+  const nameBytes = new TextEncoder().encode(name);
+  const common = [zipU32(signature), zipU16(20), zipU16(0x800), zipU16(0), zipU16(0), zipU16(0), zipU32(crc), zipU32(size), zipU32(size), zipU16(nameBytes.length), zipU16(0)];
+  if (offset == null) return new Uint8Array([...common.flatMap((x) => [...x]), ...nameBytes]);
+  return new Uint8Array([
+    ...zipU32(signature), ...zipU16(20), ...zipU16(20), ...zipU16(0x800), ...zipU16(0), ...zipU16(0), ...zipU16(0),
+    ...zipU32(crc), ...zipU32(size), ...zipU32(size), ...zipU16(nameBytes.length), ...zipU16(0), ...zipU16(0),
+    ...zipU16(0), ...zipU16(0), ...zipU32(0), ...zipU32(offset), ...nameBytes,
+  ]);
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+async function downloadAllZip() {
+  if (!state.jsonExports.length || state.busy) return;
+  try {
+    setBusy(true, "Packaging clips and metadata into a ZIP...");
+    const metadata = state.jsonExports.map((item, i) => ({
+      number: i + 1,
+      filename: item.name,
+      title: item.title,
+      hashtags: (item.tags || []).map((tag) => `#${tag.replace(/^#/, "")}`),
+      aiStart: fmt(item.originalStart),
+      aiEnd: fmt(item.originalEnd),
+      cutStart: fmt(item.start),
+      cutEnd: fmt(item.end),
+      score: item.score,
+      hook: item.hook,
+      reason: item.reason,
+      quote: item.quote,
+    }));
+    const csvRows = [["#", "filename", "title", "hashtags", "AI start", "AI end", "cut start", "cut end", "score", "hook", "reason", "quote"]];
+    metadata.forEach((m) => csvRows.push([m.number, m.filename, m.title, m.hashtags.join(" "), m.aiStart, m.aiEnd, m.cutStart, m.cutEnd, m.score, m.hook, m.reason, m.quote]));
+    const entries = [
+      { name: "metadata.json", bytes: new TextEncoder().encode(JSON.stringify({ title: state.result?.title || "Clips", clips: metadata }, null, 2)) },
+      { name: "metadata.csv", bytes: new TextEncoder().encode(csvRows.map((row) => row.map(csvCell).join(",")).join("\n")) },
+    ];
+    for (const item of state.jsonExports) {
+      setBusy(true, `Packaging ${item.name}...`);
+      entries.push({ name: `clips/${item.name}`, bytes: new Uint8Array(await (await fetch(item.url)).arrayBuffer()) });
+    }
+    const local = [], central = [];
+    let offset = 0;
+    for (const entry of entries) {
+      const crc = zipCRC(entry.bytes);
+      const localHeader = zipHeader(0x04034b50, entry.name, crc, entry.bytes.length);
+      const centralHeader = zipHeader(0x02014b50, entry.name, crc, entry.bytes.length, offset);
+      local.push(localHeader, entry.bytes);
+      central.push(centralHeader);
+      offset += localHeader.length + entry.bytes.length;
+    }
+    const centralBytes = central.reduce((n, part) => n + part.length, 0);
+    const end = new Uint8Array([
+      ...zipU32(0x06054b50), ...zipU16(0), ...zipU16(0), ...zipU16(entries.length), ...zipU16(entries.length),
+      ...zipU32(centralBytes), ...zipU32(offset), ...zipU16(0),
+    ]);
+    downloadBlob(new Blob([...local, ...central, end], { type: "application/zip" }), `${slug(state.result?.title || "clips")}-clips.zip`);
+    toast("ZIP downloaded with clips and metadata ✓");
+  } catch (e) {
+    console.error(e);
+    toast(e.message || String(e), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
 function clipLink(h) {
   return `https://youtu.be/${state.result.source.videoId}?t=${Math.floor(h.start)}`;
 }
@@ -818,6 +919,7 @@ function selectFile(file) {
 }
 
 $("#go").addEventListener("click", run);
+$("#download-zip").addEventListener("click", downloadAllZip);
 $("#opt-watch").addEventListener("input", (e) => {
   $("#watch-value").value = `${e.target.value}%`;
   $("#watch-value").textContent = `${e.target.value}%`;
