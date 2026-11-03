@@ -8,7 +8,7 @@
  *   { mode: "youtube",    url: "https://youtu.be/...", options }
  *   { mode: "transcript", transcript: "[0:00] text...", title?, durationSeconds?, options }
  *
- * options: { count, minLen, maxLen, focus, longVideo, model, watchPercent }
+ * options: { count, minLen, maxLen, focus, endingStyle, longVideo, model, watchPercent }
  *
  * Env:
  *   GEMINI_API_KEY         (secret, required)
@@ -142,9 +142,10 @@ Analyze only approximately the first ${o.watchPercent}% of the video, starting a
 
 You are an expert short-form video editor. Find the ${o.count} best standalone clips to post as Shorts / Reels / TikToks.
 ${o.focus ? `Prioritise moments matching: ${o.focus}.\n` : ""}
+Ending style: ${o.endingStyle === "suspense" ? "Create suspense. End immediately before the final reveal, answer, payoff, or resolution, while still ending at a natural pause and never cutting off a word." : "Use the full thought. Include the complete setup and payoff/resolution so the clip stands on its own."}
 Rules:
 - Each clip must be between ${o.minLen} and ${o.maxLen} seconds long.
-- Start at the beginning of a sentence or thought, and end right after the payoff. Someone with zero context must understand it.
+- Start at the beginning of a sentence or thought. ${o.endingStyle === "suspense" ? "End at a natural pause immediately before the payoff or reveal, without cutting off a word." : "End right after the payoff or resolution."} Someone with zero context must understand the setup.
 - Prefer strong hooks, surprising or bold claims, emotion, humour, clear actionable advice, quotable lines and striking visual moments.
 - Never include an intro, opening title card, channel branding, logo animation, greeting, housekeeping, or other introductory material unless it immediately contains substantive content.
 - Never include sponsorships, paid promotions, advertisements, affiliate plugs, discount codes, product placements, self-promotion, calls to subscribe/follow, or other promotional/call-to-action sections.
@@ -178,10 +179,11 @@ function normalizeOptions(o = {}) {
   const minLen = clamp(Math.round(num(o.minLen, 20)), 5, 600);
   const maxLen = clamp(Math.round(num(o.maxLen, 75)), minLen + 5, 900);
   const focus = String(o.focus || "").slice(0, 300).trim();
+  const endingStyle = o.endingStyle === "suspense" ? "suspense" : "full";
   const watchPercent = clamp(Math.round(num(o.watchPercent, 100)), 10, 100);
   const requestedModel = String(o.model || "").trim();
   const model = ALLOWED_MODELS.has(requestedModel) ? requestedModel : null;
-  return { count, minLen, maxLen, focus, longVideo: !!o.longVideo, model, watchPercent };
+  return { count, minLen, maxLen, focus, endingStyle, longVideo: !!o.longVideo, model, watchPercent };
 }
 
 function normalizeResult(data, opts, duration) {

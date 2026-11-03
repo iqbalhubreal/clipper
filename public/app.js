@@ -148,8 +148,9 @@ function getOptions() {
     count: 6,
     minLen: 20,
     maxLen: 75,
-    focus: "",
+    focus: $("#opt-focus").value.trim(),
     model: $("#opt-model").value,
+    endingStyle: $("#opt-ending").value,
     watchPercent: +$("#opt-watch").value || 100,
     longVideo: false,
   };
