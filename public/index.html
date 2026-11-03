@@ -111,14 +111,14 @@ summary{cursor:pointer;color:var(--muted)}
         <input id="yt-url" type="url" inputmode="url" placeholder="https://youtu.be/..." autocomplete="off" autocapitalize="off" spellcheck="false">
       </label>
       <button class="btn" id="yt-paste" type="button">📋 Paste URL</button>
-      <p class="hint">The URL identifies the YouTube source, including unlisted videos. The uploaded file supplies the transcription and pixels.</p>
+      <p class="hint">Gemini reads the YouTube URL and finds timestamped highlights. The uploaded file is only used as the matching source for the final cuts.</p>
     </div>
     <label id="drop">
       <input id="file" type="file" accept="video/*" hidden>
       <div id="drop-title">📁 Upload the matching video file</div>
       <div id="drop-sub">The file stays on your device. It is cut locally in your browser.</div>
     </label>
-    <p class="hint">The uploaded video supplies the actual pixels and audio for the clips. The YouTube URL supplies the transcript and highlight timestamps.</p>
+    <p class="hint">The uploaded video stays on your device and is only cut at the timestamps returned from YouTube. Its audio is not transcribed.</p>
     <label>Gemini model
       <select id="opt-model">
         <option value="gemini-3.5-flash" selected>Gemini 3.5 Flash · Medium</option>
