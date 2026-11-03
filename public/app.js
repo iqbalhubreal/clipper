@@ -229,11 +229,15 @@ async function runCombinedWorkflow() {
 }
 
 function clearJSONExports() {
-  for (const item of state.jsonExports) URL.revokeObjectURL(item.url);
+  for (const item of state.jsonExports) {
+    URL.revokeObjectURL(item.url);
+    if (item.verticalUrl) URL.revokeObjectURL(item.verticalUrl);
+  }
   state.jsonExports = [];
   $("#json-cut-list").hidden = true;
   $("#json-cut-list").innerHTML = "";
   $("#bulk-download-row").hidden = true;
+  $("#vertical-row").hidden = true;
 }
 
 function renderJSONExports() {
@@ -241,10 +245,11 @@ function renderJSONExports() {
   list.innerHTML = state.jsonExports.map((item, i) => `
     <div class="json-cut">
       <div><strong>${i + 1}. ${esc(item.title)}</strong><small>${fmt(item.start)} → ${fmt(item.end)} · ${Math.round(item.end - item.start)}s</small></div>
-      <a class="btn primary" href="${item.url}" download="${esc(item.name)}">⬇ Download MP4</a>
+      <div class="row"><a class="btn primary" href="${item.url}" download="${esc(item.name)}">⬇ MP4</a>${item.verticalUrl ? `<a class="btn" href="${item.verticalUrl}" download="${esc(item.verticalName)}">⬇ 9:16</a>` : ""}</div>
     </div>`).join("");
   list.hidden = false;
   $("#bulk-download-row").hidden = false;
+  $("#vertical-row").hidden = false;
 }
 
 async function cutSections(highlights) {
@@ -288,6 +293,42 @@ async function cutSections(highlights) {
       renderJSONExports();
     }
     toast(`${cuts.length} clip${cuts.length === 1 ? "" : "s"} ready with 2-second handles ✓`);
+  } catch (e) {
+    console.error(e);
+    toast(e.message || String(e), "error");
+  } finally {
+    ffProgress = null;
+    setBusy(false);
+  }
+}
+
+async function makeVerticalVersions() {
+  if (!state.jsonExports.length || state.busy) return;
+  try {
+    setBusy(true, "Loading video editor...");
+    const ff = await getFFmpeg();
+    const input = await ensureInput(ff, state.file);
+    for (let i = 0; i < state.jsonExports.length; i++) {
+      const item = state.jsonExports[i];
+      const out = `vertical_cut_${String(i).padStart(3, "0")}.mp4`;
+      const args = [
+        "-ss", item.start.toFixed(2), "-i", input, "-t", (item.end - item.start).toFixed(2),
+        "-vf", "crop=w='min(iw,ih*9/16)':h='min(ih,iw*16/9)',scale=720:1280,setsar=1",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out,
+      ];
+      ffProgress = (p) => setBusy(true, `Making 9:16 version ${i + 1} of ${state.jsonExports.length}... ${Math.round(Math.min(1, Math.max(0, p)) * 100)}%`);
+      setBusy(true, `Making 9:16 version ${i + 1} of ${state.jsonExports.length}...`);
+      const code = await ff.exec(args);
+      if (code !== 0) throw new Error(`Could not create a 9:16 version of “${item.title}”.`);
+      const data = await ff.readFile(out);
+      if (item.verticalUrl) URL.revokeObjectURL(item.verticalUrl);
+      item.verticalName = `${item.name.replace(/\.mp4$/i, "")}-9x16.mp4`;
+      item.verticalUrl = URL.createObjectURL(new Blob([data], { type: "video/mp4" }));
+      try { await ff.deleteFile(out); } catch {}
+      renderJSONExports();
+    }
+    toast("9:16 versions ready ✓");
   } catch (e) {
     console.error(e);
     toast(e.message || String(e), "error");
@@ -582,6 +623,7 @@ async function downloadAllZip() {
     const metadata = state.jsonExports.map((item, i) => ({
       number: i + 1,
       filename: item.name,
+      verticalFilename: item.verticalName || null,
       title: item.title,
       hashtags: (item.tags || []).map((tag) => `#${tag.replace(/^#/, "")}`),
       aiStart: fmt(item.originalStart),
@@ -602,6 +644,10 @@ async function downloadAllZip() {
     for (const item of state.jsonExports) {
       setBusy(true, `Packaging ${item.name}...`);
       entries.push({ name: `clips/${item.name}`, bytes: new Uint8Array(await (await fetch(item.url)).arrayBuffer()) });
+      if (item.verticalUrl) {
+        setBusy(true, `Packaging ${item.verticalName}...`);
+        entries.push({ name: `clips/${item.verticalName}`, bytes: new Uint8Array(await (await fetch(item.verticalUrl)).arrayBuffer()) });
+      }
     }
     const local = [], central = [];
     let offset = 0;
@@ -726,6 +772,7 @@ function selectFile(file) {
 
 $("#go").addEventListener("click", run);
 $("#download-zip").addEventListener("click", downloadAllZip);
+$("#make-vertical").addEventListener("click", makeVerticalVersions);
 $("#opt-watch").addEventListener("input", (e) => {
   $("#watch-value").value = `${e.target.value}%`;
   $("#watch-value").textContent = `${e.target.value}%`;
