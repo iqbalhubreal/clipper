@@ -10,6 +10,6 @@ binding = "AI"
 # GEMINI_API_KEY and APP_PASSWORD are SECRETS: set them with
 #   npx wrangler pages secret put GEMINI_API_KEY
 [vars]
-GEMINI_MODEL = "gemini-3.5-flash"
-GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"
+GEMINI_MODEL = "gemini-3.1-flash-lite"
+GEMINI_FALLBACK_MODEL = "gemini-3.5-flash"
 WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo"

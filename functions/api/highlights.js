@@ -18,8 +18,8 @@
  */
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL = "gemini-3.5-flash";
-const DEFAULT_FALLBACK = "gemini-3.1-flash-lite";
+const DEFAULT_MODEL = "gemini-3.1-flash-lite";
+const DEFAULT_FALLBACK = "gemini-3.5-flash";
 const ALLOWED_MODELS = new Set([
   "gemini-3.1-flash-lite",
   "gemini-3.5-flash",
